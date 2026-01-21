@@ -6,7 +6,7 @@ import re
 
 # 1. 页面配置
 st.set_page_config(page_title="ASA 原始数据看板", layout="wide")
-st.title("📱 ASA 原始数据分析 (高亮表格版)")
+st.title("📱 ASA 数据分析")
 
 # 注入 CSS
 st.markdown("""
@@ -295,3 +295,4 @@ if uploaded_file:
                 st.plotly_chart(fig2, use_container_width=True)
 else:
     st.info("👋 请上传数据文件")
+
