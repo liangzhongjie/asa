@@ -6,7 +6,7 @@ import re
 
 # 1. 页面配置
 st.set_page_config(page_title="ASA 原始数据看板", layout="wide")
-st.title("📱 ASA 原始数据分析 (精准花费版)")
+st.title("📱 ASA 原始数据分析 (精准修正版)")
 
 # 2. 侧边栏上传
 st.sidebar.header("数据源")
@@ -33,6 +33,7 @@ def load_and_clean_data(file):
             df = pd.read_excel(file)
 
         # === 阶段 2: 智能寻找表头 ===
+        # 扫描前20行，找到包含核心字段的那一行作为表头
         header_idx = -1
         for i, row in df.head(20).iterrows():
             row_str = " ".join(row.astype(str).values)
@@ -51,45 +52,74 @@ def load_and_clean_data(file):
             else:
                 df = pd.read_excel(file, header=header_idx+1)
 
-        # === 阶段 3: 列名清洗与精准映射 ===
+        # === 阶段 3: 智能列名匹配 (核心修复) ===
         df.columns = df.columns.str.strip()
         
+        # 定义一个“找最佳列”的函数，而不是简单的循环覆盖
+        def find_best_column(columns, keywords, blacklist=[]):
+            candidates = []
+            for col in columns:
+                # 检查是否包含关键字
+                if any(k in col for k in keywords):
+                    # 检查是否包含黑名单词
+                    if not any(b in col for b in blacklist):
+                        candidates.append(col)
+            
+            if not candidates:
+                return None
+                
+            # 优选逻辑：
+            # 1. 如果有完全相等的，直接返回 (比如 '花费' vs '每日花费')
+            for col in candidates:
+                if col in keywords:
+                    return col
+            
+            # 2. 否则返回名字最短的 (通常 'Installs' 比 'Installs (Total)' 更准确)
+            candidates.sort(key=len)
+            return candidates[0]
+
+        # 开始寻找
+        date_col = find_best_column(df.columns, ['日期', 'Date', 'Day'])
+        camp_col = find_best_column(df.columns, ['广告名称', 'Campaign Name', 'Campaign', '广告计划'])
+        
+        # 找下载量 (排除 '转化率', 'Rate')
+        install_col = find_best_column(
+            df.columns, 
+            ['下载量 (经点击)', 'Installs', 'Downloads', '安装', '下载', 'Conversions'], 
+            blacklist=['率', 'Rate', '转化', 'Cost', 'CPI']
+        )
+        
+        # 找花费 (排除 '每日', 'Budget', 'avg', 'Local')
+        # ★★★ 这里的 blacklist 解决了 avgLocalSpend 的问题 ★★★
+        spend_col = find_best_column(
+            df.columns, 
+            ['花费', 'Spend', 'Cost'], 
+            blacklist=['每日', 'Budget', 'avg', 'Local', 'Avg', 'CPM', 'CPT', 'CPA']
+        )
+
+        # 构建映射字典
         col_map = {}
-        for col in df.columns:
-            # 1. 日期
-            if any(x in col for x in ['日期', 'Date', 'Day']):
-                col_map[col] = 'Date'
-            
-            # 2. 广告名称
-            elif any(x in col for x in ['广告名称', 'Campaign', '广告计划']):
-                col_map[col] = 'Campaign Name'
-            
-            # 3. 下载量 (排除转化率等)
-            elif ('下载' in col and '率' not in col) or 'Installs' in col or 'Conversions' in col:
-                col_map[col] = 'Installs'
-            
-            # 4. 花费 (★★★ 关键修复 ★★★)
-            # 逻辑：必须包含“花费”或“Spend”
-            # 且：不能包含“每日”、“Budget” (排除预算列)
-            elif any(x in col for x in ['花费', 'Spend', 'Cost']):
-                if '每日' in col or 'Budget' in col:
-                    continue # 跳过“每日花费”这一列
-                col_map[col] = 'Spend'
-
+        if date_col: col_map[date_col] = 'Date'
+        if camp_col: col_map[camp_col] = 'Campaign Name'
+        if install_col: col_map[install_col] = 'Installs'
+        if spend_col: col_map[spend_col] = 'Spend'
+        
+        # 应用重命名
         df.rename(columns=col_map, inplace=True)
-
-        # 去除重复列 (防止有多个列被识别为 Installs 或 Spend)
-        df = df.loc[:, ~df.columns.duplicated()]
-
-        # 检查
+        
+        # 检查是否成功找到了关键列
         required = ['Date', 'Campaign Name', 'Installs', 'Spend']
         missing = [c for c in required if c not in df.columns]
+        
         if missing:
-            st.error(f"❌ 缺少关键列: {missing}。请检查表头是否包含‘花费’且不含‘每日’。")
-            st.write("识别到的列名:", df.columns.tolist())
+            st.error(f"❌ 无法识别下列关键列: {missing}")
+            st.write("程序识别到的映射关系:", col_map)
+            st.write("原始所有列名:", df.columns.tolist())
             return None
 
-        # === 阶段 4: 数据类型清洗 ===
+        # === 阶段 4: 数据清洗 ===
+        # 这里的 Spend 已经是正确的列了，不再会有重复列的问题
+        
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
         
@@ -114,7 +144,7 @@ def load_and_clean_data(file):
         return df
 
     except Exception as e:
-        st.error(f"⚠️ 严重错误: {e}")
+        st.error(f"⚠️ 数据处理发生严重错误: {e}")
         return None
 
 if uploaded_file:
@@ -141,7 +171,8 @@ if uploaded_file:
             def get_daily_stats(data, target_date):
                 day_data = data[data['Date'] == target_date]
                 total_installs = float(day_data['Installs'].sum())
-                total_spend = float(day_data['Spend'].sum()) # 现在这里的 Spend 是真实的“花费”列
+                total_spend = float(day_data['Spend'].sum())
+                # CPI = 总花费 / 总下载
                 cpi = total_spend / total_installs if total_installs > 0 else 0.0
                 return int(total_installs), total_spend, cpi
 
@@ -153,7 +184,7 @@ if uploaded_file:
             c1, c2, c3 = st.columns(3)
             c1.metric("总下载量 (经点击)", f"{i1:,}", f"{i1-i2:+}", delta_color="normal")
             c2.metric("综合 CPI (总花费/总下载)", f"${cpi1:.2f}", f"${cpi1-cpi2:+.2f}", delta_color="inverse")
-            c3.metric("总花费 (实际消耗)", f"${s1:,.2f}", f"${s1-s2:+,.2f}", delta_color="inverse")
+            c3.metric("总花费 (Actual Spend)", f"${s1:,.2f}", f"${s1-s2:+,.2f}", delta_color="inverse")
             
             st.markdown("---")
 
@@ -164,8 +195,6 @@ if uploaded_file:
             
             m = pd.merge(d1, d2, on='Campaign Name', suffixes=('_Now', '_Prev'), how='outer').fillna(0)
             m['Diff'] = m['Installs_Now'] - m['Installs_Prev']
-            
-            # 这里的 CPI 也是基于正确花费计算的
             m['CPI_Now'] = m.apply(lambda x: x['Spend_Now']/x['Installs_Now'] if x['Installs_Now']>0 else 0, axis=1)
             
             top = m.reindex(m['Diff'].abs().sort_values(ascending=False).index).head(10)
