@@ -6,27 +6,25 @@ import re
 
 # 1. 页面配置
 st.set_page_config(page_title="ASA 原始数据看板", layout="wide")
-st.title("📱 ASA 原始数据分析 (完美表格版)")
+st.title("📱 ASA 原始数据分析 (表格修复版)")
 
-# 注入 CSS 以美化 HTML 表格 (关键步骤)
+# 注入 CSS
 st.markdown("""
 <style>
-    /* 定义表格整体容器，确保居中 */
     .table-container {
         width: 100%;
         display: flex;
         justify-content: center;
     }
-    /* 表格样式 */
     .styled-table {
         border-collapse: collapse;
         margin: 25px 0;
         font-size: 0.9em;
         font-family: sans-serif;
-        width: 100%; /* 宽度占满 */
+        width: 100%;
         box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-        border-radius: 8px; /* 圆角 */
-        overflow: hidden; /* 隐藏溢出的圆角 */
+        border-radius: 8px;
+        overflow: hidden;
     }
     .styled-table thead tr {
         background-color: #f0f2f6;
@@ -36,7 +34,7 @@ st.markdown("""
     }
     .styled-table th, .styled-table td {
         padding: 12px 15px;
-        text-align: center; /* 默认所有单元格居中 */
+        text-align: center;
         border-bottom: 1px solid #eee;
     }
     .styled-table tbody tr:nth-of-type(even) {
@@ -45,22 +43,19 @@ st.markdown("""
     .styled-table tbody tr:last-of-type {
         border-bottom: 2px solid #009879;
     }
-    .styled-table tbody tr:hover {
-        background-color: #f1f1f1;
-    }
     
-    /* 定义涨跌颜色类 */
+    /* 涨跌颜色 */
     .trend-up {
-        color: #d62728; /* 红色 */
+        color: #d62728;
         font-weight: bold;
-        background-color: rgba(214, 39, 40, 0.1); /* 淡淡的红底 */
+        background-color: rgba(214, 39, 40, 0.1);
         border-radius: 4px;
         padding: 2px 6px;
     }
     .trend-down {
-        color: #2ca02c; /* 绿色 */
+        color: #2ca02c;
         font-weight: bold;
-        background-color: rgba(44, 160, 44, 0.1); /* 淡淡的绿底 */
+        background-color: rgba(44, 160, 44, 0.1);
         border-radius: 4px;
         padding: 2px 6px;
     }
@@ -70,11 +65,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. 侧边栏上传
+# 2. 侧边栏
 st.sidebar.header("数据源")
 uploaded_file = st.sidebar.file_uploader("请上传 ASA 导出的原始 CSV 或 Excel 文件", type=['csv', 'xlsx', 'xls'])
 
-# --- 核心数据处理函数 ---
+# --- 核心处理 ---
 @st.cache_data
 def load_and_clean_data(file):
     try:
@@ -86,8 +81,7 @@ def load_and_clean_data(file):
                 file.seek(0)
                 try:
                     df = pd.read_csv(file, encoding='gbk', on_bad_lines='skip')
-                except Exception as e:
-                    st.error(f"❌ CSV 读取失败: {e}")
+                except Exception:
                     return None
         else:
             df = pd.read_excel(file)
@@ -126,16 +120,8 @@ def load_and_clean_data(file):
 
         date_col = find_best_column(df.columns, ['日期', 'Date', 'Day'])
         camp_col = find_best_column(df.columns, ['广告名称', 'Campaign Name', 'Campaign', '广告计划'])
-        install_col = find_best_column(
-            df.columns, 
-            ['下载量 (经点击)', 'Installs', 'Downloads', '安装', '下载', 'Conversions'], 
-            blacklist=['率', 'Rate', '转化', 'Cost', 'CPI']
-        )
-        spend_col = find_best_column(
-            df.columns, 
-            ['花费', 'Spend', 'Cost'], 
-            blacklist=['每日', 'Budget', 'avg', 'Local', 'Avg', 'CPM', 'CPT', 'CPA']
-        )
+        install_col = find_best_column(df.columns, ['下载量 (经点击)', 'Installs', 'Downloads', '安装', '下载'], blacklist=['率', 'Rate', '转化', 'Cost', 'CPI'])
+        spend_col = find_best_column(df.columns, ['花费', 'Spend', 'Cost'], blacklist=['每日', 'Budget', 'avg', 'Local', 'Avg', 'CPM', 'CPT', 'CPA'])
 
         col_map = {}
         if date_col: col_map[date_col] = 'Date'
@@ -169,7 +155,6 @@ def load_and_clean_data(file):
             
         df['Country'] = df['Campaign Name'].apply(extract_country)
         return df
-
     except Exception:
         return None
 
@@ -209,12 +194,7 @@ if uploaded_file:
             def show_metric(label, current, diff, is_currency=False):
                 prefix = "$" if is_currency else ""
                 diff_val = float(diff)
-                st.metric(
-                    label, 
-                    f"{prefix}{current:,.2f}" if is_currency else f"{current:,}",
-                    f"{prefix}{diff_val:+,.2f}" if is_currency else f"{diff_val:+,.0f}",
-                    delta_color="inverse" # 正数红，负数绿
-                )
+                st.metric(label, f"{prefix}{current:,.2f}" if is_currency else f"{current:,}", f"{prefix}{diff_val:+,.2f}" if is_currency else f"{diff_val:+,.0f}", delta_color="inverse")
 
             with c1: show_metric("总下载量", i1, i1-i2, False)
             with c2: show_metric("综合 CPI", cpi1, cpi1-cpi2, True)
@@ -222,7 +202,7 @@ if uploaded_file:
             
             st.markdown("---")
 
-            # --- 波动归因 (HTML 自定义表格) ---
+            # --- 波动归因 ---
             st.subheader("🕵️‍♀️ 波动归因 (Top 10)")
             
             d1 = df[df['Date'] == date1].groupby('Campaign Name')[['Installs', 'Spend']].sum().reset_index()
@@ -234,27 +214,14 @@ if uploaded_file:
             
             top = m.reindex(m['Diff'].abs().sort_values(ascending=False).index).head(10)
             
-            # === 构建 HTML 表格字符串 ===
-            html_content = """
-            <div class="table-container">
-            <table class="styled-table">
-                <thead>
-                    <tr>
-                        <th style="width:30%;">广告计划</th>
-                        <th style="width:15%;">当前下载</th>
-                        <th style="width:15%;">对比下载</th>
-                        <th style="width:20%;">📉 波动值</th>
-                        <th style="width:20%;">当前 CPI</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
-            
+            # ★★★ 关键修复：无缩进 HTML 生成 ★★★
+            # 这里的 HTML 字符串紧贴左边，没有任何多余的空格
+            table_rows = ""
             for _, row in top.iterrows():
                 diff = row['Diff']
                 if diff > 0:
                     span_class = "trend-up"
-                    diff_text = f"▲ +{diff:,.0f}" # 加上三角符号美化
+                    diff_text = f"▲ +{diff:,.0f}"
                 elif diff < 0:
                     span_class = "trend-down"
                     diff_text = f"▼ {diff:,.0f}"
@@ -262,19 +229,28 @@ if uploaded_file:
                     span_class = "trend-flat"
                     diff_text = "-"
                 
-                html_content += f"""
-                    <tr>
-                        <td style="text-align: left !important; padding-left: 20px; font-weight:500;">{row['Campaign Name']}</td>
-                        <td>{row['Installs_Now']:,.0f}</td>
-                        <td>{row['Installs_Prev']:,.0f}</td>
-                        <td><span class="{span_class}">{diff_text}</span></td>
-                        <td>${row['CPI_Now']:.2f}</td>
-                    </tr>
-                """
-            
-            html_content += "</tbody></table></div>"
-            
-            # ★★★ 关键修复：unsafe_allow_html=True 必须开启 ★★★
+                # 注意：f-string 内部也不要随意换行缩进，防止影响 markdown 解析
+                row_html = f"<tr><td style='text-align:left!important;padding-left:20px;font-weight:500;'>{row['Campaign Name']}</td><td>{row['Installs_Now']:,.0f}</td><td>{row['Installs_Prev']:,.0f}</td><td><span class='{span_class}'>{diff_text}</span></td><td>${row['CPI_Now']:.2f}</td></tr>"
+                table_rows += row_html
+
+            html_content = f"""
+<div class="table-container">
+<table class="styled-table">
+<thead>
+<tr>
+<th style="width:30%;">广告计划</th>
+<th style="width:15%;">当前下载</th>
+<th style="width:15%;">对比下载</th>
+<th style="width:20%;">📉 波动值</th>
+<th style="width:20%;">当前 CPI</th>
+</tr>
+</thead>
+<tbody>
+{table_rows}
+</tbody>
+</table>
+</div>
+"""
             st.markdown(html_content, unsafe_allow_html=True)
 
             # --- 趋势图 ---
@@ -284,29 +260,18 @@ if uploaded_file:
             
             with tab1:
                 country_trend = df.groupby(['Date', 'Country'])['Installs'].sum().reset_index()
-                fig1 = px.bar(
-                    country_trend, 
-                    x='Date', 
-                    y='Installs', 
-                    color='Country', 
-                    title="每日下载量 (分国家)",
-                    text_auto=True 
-                )
+                fig1 = px.bar(country_trend, x='Date', y='Installs', color='Country', title="每日下载量 (分国家)", text_auto=True)
                 fig1.update_traces(textfont_size=12, textangle=0, textposition="inside", cliponaxis=False)
                 fig1.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
                 st.plotly_chart(fig1, use_container_width=True)
                 
             with tab2:
-                daily = df.groupby('Date').apply(lambda x: pd.Series({
-                    'Installs': x['Installs'].sum(), 
-                    'Spend': x['Spend'].sum()
-                })).reset_index()
+                daily = df.groupby('Date').apply(lambda x: pd.Series({'Installs': x['Installs'].sum(), 'Spend': x['Spend'].sum()})).reset_index()
                 daily['CPI'] = daily.apply(lambda x: x['Spend']/x['Installs'] if x['Installs']>0 else 0, axis=1)
                 
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scatter(
-                    x=daily['Date'], 
-                    y=daily['CPI'], 
+                    x=daily['Date'], y=daily['CPI'], 
                     mode='lines+markers+text',
                     text=[f"${x:.2f}" for x in daily['CPI']], 
                     textposition="top center",
@@ -314,12 +279,7 @@ if uploaded_file:
                     line=dict(color='#ffa726', width=3),
                     name='CPI'
                 ))
-                fig2.update_layout(
-                    title="每日综合 CPI 趋势", 
-                    yaxis_title="CPI ($)",
-                    yaxis=dict(tickformat=".2f"),
-                    margin=dict(t=50) 
-                )
+                fig2.update_layout(title="每日综合 CPI 趋势", yaxis_title="CPI ($)", yaxis=dict(tickformat=".2f"), margin=dict(t=50))
                 st.plotly_chart(fig2, use_container_width=True)
 else:
     st.info("👋 请上传数据文件")
