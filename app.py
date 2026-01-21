@@ -6,49 +6,66 @@ import re
 
 # 1. 页面配置
 st.set_page_config(page_title="ASA 原始数据看板", layout="wide")
-st.title("📱 ASA 原始数据分析 (完美样式版)")
+st.title("📱 ASA 原始数据分析 (完美表格版)")
 
-# 注入 CSS 以美化 HTML 表格
+# 注入 CSS 以美化 HTML 表格 (关键步骤)
 st.markdown("""
 <style>
-    /* 定义表格整体样式 */
+    /* 定义表格整体容器，确保居中 */
+    .table-container {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+    /* 表格样式 */
     .styled-table {
         border-collapse: collapse;
         margin: 25px 0;
         font-size: 0.9em;
         font-family: sans-serif;
-        min-width: 100%;
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+        width: 100%; /* 宽度占满 */
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        border-radius: 8px; /* 圆角 */
+        overflow: hidden; /* 隐藏溢出的圆角 */
     }
     .styled-table thead tr {
         background-color: #f0f2f6;
         color: #31333F;
         text-align: center;
+        font-weight: bold;
     }
     .styled-table th, .styled-table td {
         padding: 12px 15px;
-        text-align: center !important; /* 强制居中 */
-    }
-    .styled-table tbody tr {
-        border-bottom: 1px solid #dddddd;
+        text-align: center; /* 默认所有单元格居中 */
+        border-bottom: 1px solid #eee;
     }
     .styled-table tbody tr:nth-of-type(even) {
-        background-color: #f9f9f9;
+        background-color: #fcfcfc;
     }
     .styled-table tbody tr:last-of-type {
         border-bottom: 2px solid #009879;
     }
+    .styled-table tbody tr:hover {
+        background-color: #f1f1f1;
+    }
+    
     /* 定义涨跌颜色类 */
     .trend-up {
         color: #d62728; /* 红色 */
         font-weight: bold;
+        background-color: rgba(214, 39, 40, 0.1); /* 淡淡的红底 */
+        border-radius: 4px;
+        padding: 2px 6px;
     }
     .trend-down {
         color: #2ca02c; /* 绿色 */
         font-weight: bold;
+        background-color: rgba(44, 160, 44, 0.1); /* 淡淡的绿底 */
+        border-radius: 4px;
+        padding: 2px 6px;
     }
     .trend-flat {
-        color: gray;
+        color: #999;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -185,25 +202,18 @@ if uploaded_file:
             i1, s1, cpi1 = get_daily_stats(df, date1)
             i2, s2, cpi2 = get_daily_stats(df, date2)
 
-            # --- 顶部卡片 (颜色统一逻辑：Diff > 0 则红，Diff < 0 则绿) ---
+            # --- 顶部卡片 ---
             st.subheader(f"📊 核心数据 ({date1.date()} vs {date2.date()})")
             c1, c2, c3 = st.columns(3)
             
-            # 辅助函数：生成指标
             def show_metric(label, current, diff, is_currency=False):
                 prefix = "$" if is_currency else ""
                 diff_val = float(diff)
-                
-                # 统一逻辑：上涨(>0)为红，下跌(<0)为绿
-                # Streamlit 'inverse' 逻辑：正红负绿 (正好符合需求)
-                # Streamlit 'normal' 逻辑：正绿负红
-                color_mode = "inverse" 
-                
                 st.metric(
                     label, 
                     f"{prefix}{current:,.2f}" if is_currency else f"{current:,}",
                     f"{prefix}{diff_val:+,.2f}" if is_currency else f"{diff_val:+,.0f}",
-                    delta_color=color_mode
+                    delta_color="inverse" # 正数红，负数绿
                 )
 
             with c1: show_metric("总下载量", i1, i1-i2, False)
@@ -224,16 +234,17 @@ if uploaded_file:
             
             top = m.reindex(m['Diff'].abs().sort_values(ascending=False).index).head(10)
             
-            # --- 构建 HTML 表格 ---
-            html_table = """
+            # === 构建 HTML 表格字符串 ===
+            html_content = """
+            <div class="table-container">
             <table class="styled-table">
                 <thead>
                     <tr>
-                        <th>广告计划</th>
-                        <th>当前下载</th>
-                        <th>对比下载</th>
-                        <th>📉 波动值</th>
-                        <th>当前 CPI</th>
+                        <th style="width:30%;">广告计划</th>
+                        <th style="width:15%;">当前下载</th>
+                        <th style="width:15%;">对比下载</th>
+                        <th style="width:20%;">📉 波动值</th>
+                        <th style="width:20%;">当前 CPI</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -241,29 +252,30 @@ if uploaded_file:
             
             for _, row in top.iterrows():
                 diff = row['Diff']
-                # 定义样式类
                 if diff > 0:
-                    diff_class = "trend-up"  # 红
-                    diff_str = f"+{diff:,.0f}"
+                    span_class = "trend-up"
+                    diff_text = f"▲ +{diff:,.0f}" # 加上三角符号美化
                 elif diff < 0:
-                    diff_class = "trend-down" # 绿
-                    diff_str = f"{diff:,.0f}"
+                    span_class = "trend-down"
+                    diff_text = f"▼ {diff:,.0f}"
                 else:
-                    diff_class = "trend-flat"
-                    diff_str = "-"
+                    span_class = "trend-flat"
+                    diff_text = "-"
                 
-                html_table += f"""
+                html_content += f"""
                     <tr>
-                        <td style="text-align: left !important; padding-left: 20px;">{row['Campaign Name']}</td>
+                        <td style="text-align: left !important; padding-left: 20px; font-weight:500;">{row['Campaign Name']}</td>
                         <td>{row['Installs_Now']:,.0f}</td>
                         <td>{row['Installs_Prev']:,.0f}</td>
-                        <td class="{diff_class}">{diff_str}</td>
+                        <td><span class="{span_class}">{diff_text}</span></td>
                         <td>${row['CPI_Now']:.2f}</td>
                     </tr>
                 """
             
-            html_table += "</tbody></table>"
-            st.markdown(html_table, unsafe_allow_html=True)
+            html_content += "</tbody></table></div>"
+            
+            # ★★★ 关键修复：unsafe_allow_html=True 必须开启 ★★★
+            st.markdown(html_content, unsafe_allow_html=True)
 
             # --- 趋势图 ---
             st.markdown("---")
@@ -278,7 +290,7 @@ if uploaded_file:
                     y='Installs', 
                     color='Country', 
                     title="每日下载量 (分国家)",
-                    text_auto=True # 自动显示数值
+                    text_auto=True 
                 )
                 fig1.update_traces(textfont_size=12, textangle=0, textposition="inside", cliponaxis=False)
                 fig1.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
@@ -296,7 +308,7 @@ if uploaded_file:
                     x=daily['Date'], 
                     y=daily['CPI'], 
                     mode='lines+markers+text',
-                    text=[f"${x:.2f}" for x in daily['CPI']], # 显式显示两位小数
+                    text=[f"${x:.2f}" for x in daily['CPI']], 
                     textposition="top center",
                     textfont=dict(size=12, color="black"),
                     line=dict(color='#ffa726', width=3),
@@ -306,7 +318,7 @@ if uploaded_file:
                     title="每日综合 CPI 趋势", 
                     yaxis_title="CPI ($)",
                     yaxis=dict(tickformat=".2f"),
-                    margin=dict(t=50) # 增加顶部边距防止数字被截断
+                    margin=dict(t=50) 
                 )
                 st.plotly_chart(fig2, use_container_width=True)
 else:
