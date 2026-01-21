@@ -6,7 +6,7 @@ import re
 
 # 1. 页面配置
 st.set_page_config(page_title="ASA 原始数据看板", layout="wide")
-st.title("📱 ASA 原始数据分析 (表格修复版)")
+st.title("📱 ASA 原始数据分析 (高亮表格版)")
 
 # 注入 CSS
 st.markdown("""
@@ -15,6 +15,7 @@ st.markdown("""
         width: 100%;
         display: flex;
         justify-content: center;
+        padding: 10px;
     }
     .styled-table {
         border-collapse: collapse;
@@ -22,24 +23,36 @@ st.markdown("""
         font-size: 0.9em;
         font-family: sans-serif;
         width: 100%;
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-        border-radius: 8px;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+        border-radius: 10px;
         overflow: hidden;
+        /* ★★★ 关键修改：强制白色背景，与深色界面形成反差 ★★★ */
+        background-color: #ffffff; 
     }
     .styled-table thead tr {
-        background-color: #f0f2f6;
-        color: #31333F;
+        background-color: #009879; /*以此改为显眼的绿色表头，或保持浅灰 #f0f2f6 */
+        background-color: #f0f2f6; 
+        color: #333333;
         text-align: center;
         font-weight: bold;
+        border-bottom: 2px solid #dddddd;
     }
     .styled-table th, .styled-table td {
         padding: 12px 15px;
         text-align: center;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid #eeeeee;
+        /* ★★★ 强制深色文字，防止在深色模式下变白看不清 ★★★ */
+        color: #333333; 
     }
+    /* 偶数行颜色 */
     .styled-table tbody tr:nth-of-type(even) {
-        background-color: #fcfcfc;
+        background-color: #f3f3f3;
     }
+    /* 奇数行颜色 (显式设置，防止透明) */
+    .styled-table tbody tr:nth-of-type(odd) {
+        background-color: #ffffff;
+    }
+    
     .styled-table tbody tr:last-of-type {
         border-bottom: 2px solid #009879;
     }
@@ -214,8 +227,7 @@ if uploaded_file:
             
             top = m.reindex(m['Diff'].abs().sort_values(ascending=False).index).head(10)
             
-            # ★★★ 关键修复：无缩进 HTML 生成 ★★★
-            # 这里的 HTML 字符串紧贴左边，没有任何多余的空格
+            # 严格无缩进 HTML 生成
             table_rows = ""
             for _, row in top.iterrows():
                 diff = row['Diff']
@@ -229,7 +241,7 @@ if uploaded_file:
                     span_class = "trend-flat"
                     diff_text = "-"
                 
-                # 注意：f-string 内部也不要随意换行缩进，防止影响 markdown 解析
+                # 无缩进拼接
                 row_html = f"<tr><td style='text-align:left!important;padding-left:20px;font-weight:500;'>{row['Campaign Name']}</td><td>{row['Installs_Now']:,.0f}</td><td>{row['Installs_Prev']:,.0f}</td><td><span class='{span_class}'>{diff_text}</span></td><td>${row['CPI_Now']:.2f}</td></tr>"
                 table_rows += row_html
 
