@@ -6,7 +6,52 @@ import re
 
 # 1. 页面配置
 st.set_page_config(page_title="ASA 原始数据看板", layout="wide")
-st.title("📱 ASA 原始数据分析 (美化版)")
+st.title("📱 ASA 原始数据分析 (完美样式版)")
+
+# 注入 CSS 以美化 HTML 表格
+st.markdown("""
+<style>
+    /* 定义表格整体样式 */
+    .styled-table {
+        border-collapse: collapse;
+        margin: 25px 0;
+        font-size: 0.9em;
+        font-family: sans-serif;
+        min-width: 100%;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+    }
+    .styled-table thead tr {
+        background-color: #f0f2f6;
+        color: #31333F;
+        text-align: center;
+    }
+    .styled-table th, .styled-table td {
+        padding: 12px 15px;
+        text-align: center !important; /* 强制居中 */
+    }
+    .styled-table tbody tr {
+        border-bottom: 1px solid #dddddd;
+    }
+    .styled-table tbody tr:nth-of-type(even) {
+        background-color: #f9f9f9;
+    }
+    .styled-table tbody tr:last-of-type {
+        border-bottom: 2px solid #009879;
+    }
+    /* 定义涨跌颜色类 */
+    .trend-up {
+        color: #d62728; /* 红色 */
+        font-weight: bold;
+    }
+    .trend-down {
+        color: #2ca02c; /* 绿色 */
+        font-weight: bold;
+    }
+    .trend-flat {
+        color: gray;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # 2. 侧边栏上传
 st.sidebar.header("数据源")
@@ -17,8 +62,6 @@ uploaded_file = st.sidebar.file_uploader("请上传 ASA 导出的原始 CSV 或 
 def load_and_clean_data(file):
     try:
         df = None
-        
-        # === 阶段 1: 暴力读取 ===
         if file.name.endswith('.csv'):
             try:
                 df = pd.read_csv(file, encoding='utf-8', on_bad_lines='skip')
@@ -32,7 +75,6 @@ def load_and_clean_data(file):
         else:
             df = pd.read_excel(file)
 
-        # === 阶段 2: 智能寻找表头 ===
         header_idx = -1
         for i, row in df.head(20).iterrows():
             row_str = " ".join(row.astype(str).values)
@@ -51,7 +93,6 @@ def load_and_clean_data(file):
             else:
                 df = pd.read_excel(file, header=header_idx+1)
 
-        # === 阶段 3: 智能列名匹配 ===
         df.columns = df.columns.str.strip()
         
         def find_best_column(columns, keywords, blacklist=[]):
@@ -86,15 +127,11 @@ def load_and_clean_data(file):
         if spend_col: col_map[spend_col] = 'Spend'
         
         df.rename(columns=col_map, inplace=True)
+        df = df.loc[:, ~df.columns.duplicated()]
         
         required = ['Date', 'Campaign Name', 'Installs', 'Spend']
-        missing = [c for c in required if c not in df.columns]
-        if missing:
-            st.error(f"❌ 无法识别下列关键列: {missing}")
-            return None
+        if any(c not in df.columns for c in required): return None
 
-        # === 阶段 4: 数据清洗 ===
-        df = df.loc[:, ~df.columns.duplicated()] # 去重
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
         
@@ -106,7 +143,6 @@ def load_and_clean_data(file):
         for col in ['Installs', 'Spend']:
             df[col] = df[col].apply(clean_num).apply(pd.to_numeric, errors='coerce').fillna(0)
 
-        # === 阶段 5: 提取国家 ===
         def extract_country(name):
             if not isinstance(name, str): return "Unknown"
             parts = re.split(r'[_ -]', name)
@@ -115,11 +151,9 @@ def load_and_clean_data(file):
             return name[:2].upper()
             
         df['Country'] = df['Campaign Name'].apply(extract_country)
-
         return df
 
-    except Exception as e:
-        st.error(f"⚠️ 数据处理发生严重错误: {e}")
+    except Exception:
         return None
 
 if uploaded_file:
@@ -131,7 +165,6 @@ if uploaded_file:
         if len(all_dates) == 0:
             st.error("数据为空")
         else:
-            # 侧边栏
             st.sidebar.markdown("---")
             st.sidebar.subheader("📅 日期对比")
             latest = all_dates[-1]
@@ -142,7 +175,6 @@ if uploaded_file:
             date1 = pd.to_datetime(date1)
             date2 = pd.to_datetime(date2)
 
-            # --- 计算函数 ---
             def get_daily_stats(data, target_date):
                 day_data = data[data['Date'] == target_date]
                 total_installs = float(day_data['Installs'].sum())
@@ -153,25 +185,36 @@ if uploaded_file:
             i1, s1, cpi1 = get_daily_stats(df, date1)
             i2, s2, cpi2 = get_daily_stats(df, date2)
 
-            # --- 页面展示 ---
+            # --- 顶部卡片 (颜色统一逻辑：Diff > 0 则红，Diff < 0 则绿) ---
             st.subheader(f"📊 核心数据 ({date1.date()} vs {date2.date()})")
             c1, c2, c3 = st.columns(3)
             
-            # 统一颜色逻辑：delta_color="inverse"
-            # 在 Streamlit 中，inverse 表示：正数(增长)显示红色，负数(下降)显示绿色。
-            # 这符合中国“红涨绿跌”的习惯。
-            
-            with c1:
-                st.metric("总下载量", f"{i1:,}", f"{i1-i2:+}", delta_color="inverse")
-            with c2:
-                st.metric("综合 CPI", f"${cpi1:.2f}", f"${cpi1-cpi2:+.2f}", delta_color="inverse")
-            with c3:
-                st.metric("总花费", f"${s1:,.2f}", f"${s1-s2:+,.2f}", delta_color="inverse")
+            # 辅助函数：生成指标
+            def show_metric(label, current, diff, is_currency=False):
+                prefix = "$" if is_currency else ""
+                diff_val = float(diff)
+                
+                # 统一逻辑：上涨(>0)为红，下跌(<0)为绿
+                # Streamlit 'inverse' 逻辑：正红负绿 (正好符合需求)
+                # Streamlit 'normal' 逻辑：正绿负红
+                color_mode = "inverse" 
+                
+                st.metric(
+                    label, 
+                    f"{prefix}{current:,.2f}" if is_currency else f"{current:,}",
+                    f"{prefix}{diff_val:+,.2f}" if is_currency else f"{diff_val:+,.0f}",
+                    delta_color=color_mode
+                )
+
+            with c1: show_metric("总下载量", i1, i1-i2, False)
+            with c2: show_metric("综合 CPI", cpi1, cpi1-cpi2, True)
+            with c3: show_metric("总花费", s1, s1-s2, True)
             
             st.markdown("---")
 
-            # --- 波动归因 ---
+            # --- 波动归因 (HTML 自定义表格) ---
             st.subheader("🕵️‍♀️ 波动归因 (Top 10)")
+            
             d1 = df[df['Date'] == date1].groupby('Campaign Name')[['Installs', 'Spend']].sum().reset_index()
             d2 = df[df['Date'] == date2].groupby('Campaign Name')[['Installs', 'Spend']].sum().reset_index()
             
@@ -181,32 +224,46 @@ if uploaded_file:
             
             top = m.reindex(m['Diff'].abs().sort_values(ascending=False).index).head(10)
             
-            # 美化表格：使用 Pandas Styler
-            # 1. 设置数值居中
-            # 2. 格式化数字 (CPI 保留2位)
-            # 3. 波动值着色 (红涨绿跌)
+            # --- 构建 HTML 表格 ---
+            html_table = """
+            <table class="styled-table">
+                <thead>
+                    <tr>
+                        <th>广告计划</th>
+                        <th>当前下载</th>
+                        <th>对比下载</th>
+                        <th>📉 波动值</th>
+                        <th>当前 CPI</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
             
-            def highlight_diff(val):
-                color = '#ff4b4b' if val > 0 else '#09ab3b' # Streamlit 标准红绿
-                if val == 0: color = 'grey'
-                return f'color: {color}; font-weight: bold;'
-
-            st.dataframe(
-                top[['Campaign Name', 'Installs_Now', 'Installs_Prev', 'Diff', 'CPI_Now']]
-                .style
-                .format({'CPI_Now': "{:.2f}", 'Installs_Now': "{:,.0f}", 'Installs_Prev': "{:,.0f}", 'Diff': "{:+,.0f}"})
-                .applymap(highlight_diff, subset=['Diff'])
-                .set_properties(**{'text-align': 'center'})
-                .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}]), # 表头也居中
-                use_container_width=True,
-                column_config={
-                    "Campaign Name": "广告计划",
-                    "Installs_Now": "当前下载",
-                    "Installs_Prev": "对比下载",
-                    "Diff": "📉 波动值",
-                    "CPI_Now": "当前CPI"
-                }
-            )
+            for _, row in top.iterrows():
+                diff = row['Diff']
+                # 定义样式类
+                if diff > 0:
+                    diff_class = "trend-up"  # 红
+                    diff_str = f"+{diff:,.0f}"
+                elif diff < 0:
+                    diff_class = "trend-down" # 绿
+                    diff_str = f"{diff:,.0f}"
+                else:
+                    diff_class = "trend-flat"
+                    diff_str = "-"
+                
+                html_table += f"""
+                    <tr>
+                        <td style="text-align: left !important; padding-left: 20px;">{row['Campaign Name']}</td>
+                        <td>{row['Installs_Now']:,.0f}</td>
+                        <td>{row['Installs_Prev']:,.0f}</td>
+                        <td class="{diff_class}">{diff_str}</td>
+                        <td>${row['CPI_Now']:.2f}</td>
+                    </tr>
+                """
+            
+            html_table += "</tbody></table>"
+            st.markdown(html_table, unsafe_allow_html=True)
 
             # --- 趋势图 ---
             st.markdown("---")
@@ -215,16 +272,16 @@ if uploaded_file:
             
             with tab1:
                 country_trend = df.groupby(['Date', 'Country'])['Installs'].sum().reset_index()
-                # 使用 text_auto 显示数值
                 fig1 = px.bar(
                     country_trend, 
                     x='Date', 
                     y='Installs', 
                     color='Country', 
                     title="每日下载量 (分国家)",
-                    text_auto=True 
+                    text_auto=True # 自动显示数值
                 )
-                fig1.update_traces(textposition='inside') # 数值显示在柱子内部
+                fig1.update_traces(textfont_size=12, textangle=0, textposition="inside", cliponaxis=False)
+                fig1.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
                 st.plotly_chart(fig1, use_container_width=True)
                 
             with tab2:
@@ -238,16 +295,18 @@ if uploaded_file:
                 fig2.add_trace(go.Scatter(
                     x=daily['Date'], 
                     y=daily['CPI'], 
-                    mode='lines+markers+text', # 增加 text 模式
-                    text=[f"${x:.2f}" for x in daily['CPI']], # 显式格式化为两位小数
-                    textposition="top center", # 数字显示在点上方
+                    mode='lines+markers+text',
+                    text=[f"${x:.2f}" for x in daily['CPI']], # 显式显示两位小数
+                    textposition="top center",
+                    textfont=dict(size=12, color="black"),
                     line=dict(color='#ffa726', width=3),
                     name='CPI'
                 ))
                 fig2.update_layout(
                     title="每日综合 CPI 趋势", 
                     yaxis_title="CPI ($)",
-                    yaxis=dict(tickformat=".2f") # Y轴也保留两位
+                    yaxis=dict(tickformat=".2f"),
+                    margin=dict(t=50) # 增加顶部边距防止数字被截断
                 )
                 st.plotly_chart(fig2, use_container_width=True)
 else:
